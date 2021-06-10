@@ -1,0 +1,220 @@
+---
+title: "Sentiment Extension"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#loading necessary package
+library(shiny)
+library(tm)
+library(memoise)
+library(shinythemes)
+library(tidyverse)
+library(rlang)
+library(tidytext) #to access sentiment dictionaries
+library(reshape2) #for manipulating data to be turned into a wordcloud
+#install.packages("wordcloud2")
+library(wordcloud)
+library(wordcloud2)#for generating wordclouds
+```
+
+```{r}
+
+ui <- fluidPage(theme = shinytheme("lumen"),
+  h1("Wordcloud Generating Tool"),
+tabsetPanel(
+    # Create a "Word cloud" tab
+    tabPanel(title = "Basic Word Cloud", 
+             sidebarLayout(
+        sidebarPanel(
+      #fileInput('file', "Upload",accept = c('text/csv','text/comma-separated-values','text/tab-separated-values','.csv','.tsv'),placeholder = "No file selected" ),
+      selectInput("Category", "Choose a category:", choices = c("self sentiment"="classself","class sentiment"="classall","instructor sentiment"="classinstructor" )) ,
+      hr(),
+      checkboxInput("add","Add more words",FALSE),
+      conditionalPanel(
+        condition = "input.add == 1",
+        textAreaInput("text","Enter text (lower case, separated by ',' followed by 1 space only)", rows=7)
+      ),
+      checkboxInput("remove","Remove specific words?",FALSE),
+      conditionalPanel(
+        condition = "input.remove == 1",
+        textAreaInput("words_to_remove1","Words to remove (1 per line)", rows=1)
+      ),
+      conditionalPanel(
+        condition = "input.remove == 1 && input.words_to_remove1.length > 0",
+        textAreaInput("words_to_remove2","", rows=1)
+      ),
+      conditionalPanel(
+        condition = "input.remove == 1 && input.words_to_remove2.length > 0",
+        textAreaInput("words_to_remove3","", rows=1)
+      ),
+        sliderInput("freq",
+                  "Minimum Frequency:",
+                  min = 1,  max = 5, value = 2),
+      sliderInput("max",
+                  "Maximum Number of Words:",
+                  min = 1,  max = 50,  value = 5)
+      ),
+    mainPanel(
+      
+        plotOutput("plot", height="500px")
+      )
+     
+#change to wordcloud2Output if wanting to get wordcloud2 plot. See instruction in line 136
+        )
+    ),
+    tabPanel(title = "Sorted Word Cloud",
+       sidebarLayout(
+        sidebarPanel(
+      selectInput("Category1", "Choose a category:", choices = c("self sentiment"="classself","class sentiment"="classall","instructor sentiment"="classinstructor" )),
+      hr(),
+      checkboxInput("add1","Add more words",FALSE),
+      conditionalPanel(
+        condition = "input.add1 == 1",
+        textAreaInput("text1","Enter text (lower case, separated by ',' only)", rows=7)
+      ),
+      
+        sliderInput("freq1",
+                  "Minimum Frequency:",
+                  min = 1,  max = 5, value = 2),
+      sliderInput("max1",
+                  "Maximum Number of Words:",
+                  min = 1,  max = 50,  value = 5)
+      ),
+    mainPanel(
+      plotOutput("plot1", height = "700px")
+        )
+       )      
+    )
+)
+    
+        
+   
+)
+```
+
+```{r}
+#Create server
+server <- function(input, output) {
+  set.seed(399)
+  data = read_csv("C:/Uni/Stats 399/Sentiment pj/sentiment-data.csv")
+  #Global R
+  
+  ##Create word cloud
+  #Make the wordcloud drawing predictable during a session
+wordcloud_rep <- repeatable(wordcloud)
+
+  output$plot <- renderPlot({
+    var=data[,input$Category] #var corespond to choice of data column from interface
+      
+      if (input$Category == "classself") { 
+        var <- var %>%  mutate(classself=strsplit(as.character(classself),",")) %>% unnest(classself)
+      }  
+    
+## If text is provided, convert it to a dataframe of word frequencies
+    #Combine new words to the data frame
+      if (input$add == TRUE) {
+        new_word <- unnest(as.data.frame(strsplit(as.character(input$text),", ")))
+        names(new_word)<-input$Category
+        var <- rbind(var,new_word)
+      } 
+    #Clean text
+      myCorpus = Corpus(VectorSource(var))
+                        myCorpus = tm_map(myCorpus, content_transformer(tolower))
+                        myCorpus = tm_map(myCorpus, removePunctuation)
+                        myCorpus = tm_map(myCorpus, removeNumbers)
+                        myCorpus <- tm_map(myCorpus, removeWords, c(input$words_to_remove1))
+                        myCorpus <- tm_map(myCorpus, removeWords, c(input$words_to_remove2))
+                        myCorpus <- tm_map(myCorpus, removeWords, c(input$words_to_remove3))
+                        myDTM = TermDocumentMatrix(myCorpus)
+                        m = as.matrix(myDTM)
+                        var <- sort(rowSums(m), decreasing = TRUE) 
+                        a=data.frame(word = names(var), freq = as.numeric(var))
+     wordcloud_rep(words=a$word, freq=a$freq, min.freq=input$freq,max.words=input$max, scale=c(5,1),random.order=FALSE, colors=brewer.pal(8, "Dark2")) })  
+  
+  
+##those comment line below can be used for generating wordcloud2 if you want to try. It's more appealing but misleading however, and it omitted words
+# create_wordcloud <- function(data, num_word=100) {
+   # if (!is.numeric(num_word) || num_word < 3) { num_word <- 3 }
+    # Change number of maximum word
+    #data <- head(data, n = num_words)
+    #if (nrow(data) == 0) { return(NULL)  }
+    #wordcloud2(data) }
+    #wordcloud_rep(a,num_word=input$max) 
+
+  
+ ####Sorted Word Cloud ####
+
+#Make the wordcloud drawing predictable during a session
+ wordcloud_rep1 <- repeatable(comparison.cloud)
+
+  output$plot1 <- renderPlot({ 
+    var1=data[,input$Category1]
+      if (input$Category1 == "classself") { 
+        var1 <- var1 %>% mutate(classself=strsplit(as.character(classself),",")) %>% unnest(classself)
+      }
+    #Combine new words to the data frame
+    if (input$add1 == TRUE) {
+        new_word <- unnest(as.data.frame(strsplit(as.character(input$text1),", ")))
+        names(new_word)<-input$Category1
+        var1 <- rbind(var1,new_word)
+      }
+        #adding missing words to lexicon
+additional_sentiment <- tibble(word=c("curious","expectant","stressed","accomodating","anticipating","unique","intrigued","perceptive"), sentiment=c("positive","positive","negative","positive","positive","positive", "positive", "positive"))
+
+new_sentiment <- get_sentiments("bing")%>%
+                    rbind(additional_sentiment)
+new_sentiment$sentiment[new_sentiment$word=="funny"]<-"positive"
+
+#Joining each group with sentiment lexicon:
+#renaming column names in order to join by column name "word" with sentiment lexicon
+var1 <- var1 %>% rename(word = input$Category1)
+
+#joining data with lexicon in order to assign sentiment scores for each word
+var1 <- var1 %>%
+  inner_join(new_sentiment)%>%
+  count(word, sentiment, sort =TRUE)%>%
+  acast(word~sentiment,value.var="n",fill=0)
+
+#reverse positive and negative order in acast matrix
+var1 <- select(as.data.frame(var1),positive,negative)
+
+#generate wordcloud
+    wordcloud_rep1(var1,title.size=3,scale=c(5,0.9),max.words=input$max1,rot.per=0.01,match.colors=TRUE,random.order=FALSE,colors=c("dodgerblue1", "gold2"),max_size=5)
+  })
+
+}
+
+```
+
+
+```{r}
+shinyApp(ui=ui, server=server)
+```
+
+
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+
+
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
